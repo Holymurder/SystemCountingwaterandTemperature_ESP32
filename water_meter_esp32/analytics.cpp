@@ -43,6 +43,9 @@ static int findDayRecord(const char* date) {
 }
 
 void commitTodayToLog() {
+  // Don't persist a record that has no data at all (e.g. fresh day after midnight reset)
+  if (todayCold == 0.0f && todayWarm == 0.0f && todayHot == 0.0f) return;
+
   int idx = findDayRecord(todayDate);
   if (idx < 0) {
     if (dayLogCount >= MAX_DAYS) purgeOldest();
@@ -63,10 +66,14 @@ void checkDayChange() {
   if (strcmp(currentDate, todayDate) == 0) return;
 
   Serial.printf("[DAY] %s -> %s\n", todayDate, currentDate);
+
+  // Commit yesterday's data BEFORE resetting accumulators
+  // commitTodayToLog uses todayDate (old) and todayCold/Warm/Hot (still valid here)
   commitTodayToLog();
+
   strncpy(todayDate, currentDate, 12);
   todayCold = todayWarm = todayHot = todayCost = 0.0f;
-  saveData();
+  saveData(); // saves new todayDate + zeroed accumulators
 }
 
 void resetAllData() {

@@ -61,13 +61,12 @@ static void showMsg(const char* line1, const char* line2 = nullptr, int ms = 120
 
 void handleKey(char key) {
 
-  // ---- MAIN MENU ----
   if (menu == M_MAIN) {
-    if (key == '8' || key == 'A') menuIdx = max(menuIdx - 1, 0);
-    if (key == '2' || key == 'B') menuIdx = min(menuIdx + 1, 5);
-    if (key >= '1' && key <= '6') menuIdx = key - '1';
+    if (key == '8') menuIdx = max(menuIdx - 1, 0);
+    if (key == '2') menuIdx = min(menuIdx + 1, 4);
+    if (key >= '1' && key <= '5') menuIdx = key - '1';
 
-    if (key == '#') {
+    if (key == '#' || key == 'A') {
       switch (menuIdx) {
         case 0: menu = M_METER; break;
         case 1: menu = M_ANALYTICS; analyticsPage = 0; break;
@@ -82,7 +81,6 @@ void handleKey(char key) {
           break;
         case 3: menu = M_WIFI;      break;
         case 4: menu = M_CLOCK;     break;
-        case 5: menu = M_RESET;     break;
       }
       menuIdx = 0;
     }
@@ -119,7 +117,7 @@ void handleKey(char key) {
   }
 
   // ---- SIMPLE BACK SCREENS ----
-  if (menu == M_METER || menu == M_CLOCK || menu == M_WIFI) {
+  if (menu == M_METER || menu == M_CLOCK || menu == M_WIFI || menu == M_WIFI_CONNECT_WEB) {
     if (key == '#') menu = M_MAIN;
     return;
   }
@@ -132,14 +130,14 @@ void handleKey(char key) {
     for (int i = 0; i < dayLogCount; i++)
       if (strcmp(dayLog[i].date, todayDate) != 0) total++;
 
-    if ((key == '2' || key == 'B') && analyticsPage < total - 1) analyticsPage++;
-    if ((key == '8' || key == 'A') && analyticsPage > 0)         analyticsPage--;
+    if (key == '2' && analyticsPage < total - 1) analyticsPage++;
+    if (key == '8' && analyticsPage > 0)         analyticsPage--;
     return;
   }
 
   // ---- RESET ----
   if (menu == M_RESET) {
-    if (key == '*') { resetAllData(); menu = M_MAIN; }  // '*' = confirm reset
+    if (key == 'A') { resetAllData(); menu = M_MAIN; }
     if (key == '#') menu = M_MAIN;
     return;
   }
@@ -148,17 +146,6 @@ void handleKey(char key) {
   if (menu == M_SETTINGS) {
     if (key == '1') { menu = M_SET_TAR_MENU; tarSelectIdx = 0; }
     if (key == '2') {
-      menu = M_WIFI_SCAN;
-      foundNetworkCount = 0; selectedNetwork = 0; wifiListScroll = 0;
-      updateDisplay();
-      Serial.println("[WiFi] Scanning...");
-      int n = WiFi.scanNetworks();
-      foundNetworkCount = min(n, MAX_NETWORKS);
-      for (int i = 0; i < foundNetworkCount; i++)
-        foundNetworks[i] = WiFi.SSID(i);
-      Serial.printf("[WiFi] Found %d\n", foundNetworkCount);
-    }
-    if (key == '3') {
       wifiOn = !wifiOn;
       if (wifiOn) {
         WiFi.mode(WIFI_AP_STA);
@@ -180,7 +167,8 @@ void handleKey(char key) {
         ntpSynced = false;
       }
     }
-    if (key == '4') { menu = M_SET_THRESH; }
+    if (key == '3') { menu = M_SET_THRESH; }
+    if (key == '4') { menu = M_RESET; }
     if (key == '#') { settingsUnlocked = false; menu = M_MAIN; }
     return;
   }
@@ -192,8 +180,6 @@ void handleKey(char key) {
       menu = M_SET_TAR_VAL;
       inputBuf = "";
     }
-    if (key == 'A') tarSelectIdx = max(tarSelectIdx - 1, 0);
-    if (key == 'B') tarSelectIdx = min(tarSelectIdx + 1, 2);
     if (key == '#') menu = M_SETTINGS;
     return;
   }
@@ -213,67 +199,6 @@ void handleKey(char key) {
       inputBuf = "";
       menu = M_SET_TAR_MENU;
     }
-    return;
-  }
-
-  // ---- WIFI SCAN ----
-  if (menu == M_WIFI_SCAN) {
-    if (foundNetworkCount == 0) return;
-    if ((key == '2' || key == 'B') && selectedNetwork < foundNetworkCount - 1) {
-      selectedNetwork++;
-      if (selectedNetwork >= wifiListScroll + 4) wifiListScroll = selectedNetwork - 3;
-    }
-    if ((key == '8' || key == 'A') && selectedNetwork > 0) {
-      selectedNetwork--;
-      if (selectedNetwork < wifiListScroll) wifiListScroll = selectedNetwork;
-    }
-    if (key == '#') { menu = M_WIFI_PASS; inputBuf = ""; }
-    if (key == 'C') menu = M_SETTINGS;
-    return;
-  }
-
-  // ---- WIFI PASSWORD ----
-  if (menu == M_WIFI_PASS) {
-    if (key >= '0' && key <= '9') { if (inputBuf.length() < 32) inputBuf += key; return; }
-    if (key == '*')  { if (inputBuf.length() < 32) inputBuf += '.'; return; }
-    if (key == 'D')  { if (inputBuf.length() > 0) inputBuf.remove(inputBuf.length()-1); return; }
-    if (key == 'C')  { inputBuf = ""; menu = M_WIFI_SCAN; return; }
-
-    if (key == '#') {
-      String selSSID = foundNetworks[selectedNetwork];
-      String selPass = inputBuf;
-
-      showMsg("Connecting...", selSSID.c_str(), 0);
-      WiFi.begin(selSSID.c_str(), selPass.c_str());
-      int att = 0;
-      while (WiFi.status() != WL_CONNECTED && att < 20) { delay(500); att++; }
-
-      if (WiFi.status() == WL_CONNECTED) {
-        strncpy(homeSSID, selSSID.c_str(), 32);
-        strncpy(homePass, selPass.c_str(), 64);
-        saveData();
-        syncNTP();
-        showMsg("Connected!", ntpSynced ? "NTP: OK" : nullptr, 1500);
-        inputBuf = "";
-        menu = M_WIFI_DEFAULT;
-      } else {
-        showMsg("Failed!", "Wrong password?", 1500);
-        inputBuf = "";
-        menu = M_WIFI_SCAN;
-      }
-    }
-    return;
-  }
-
-  // ---- WIFI SET DEFAULT ----
-  if (menu == M_WIFI_DEFAULT) {
-    if (key == 'A') {
-      strncpy(defaultSSID, homeSSID, 32);
-      strncpy(defaultPass, homePass, 64);
-      saveData();
-      showMsg("Saved as default!", "Auto-connect on boot", 1500);
-    }
-    menu = M_SETTINGS;
     return;
   }
 

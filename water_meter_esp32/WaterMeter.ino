@@ -26,14 +26,12 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <DNSServer.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
-
 #include "config.h"
 #include "globals.h"
 #include "clock.h"
 #include "storage.h"
 #include "analytics.h"
+#include "temperature.h"
 #include "flow.h"
 #include "display.h"
 #include "input.h"
@@ -77,18 +75,11 @@ char defaultSSID[32]  = "";
 char defaultPass[64]  = "";
 bool settingsUnlocked = false;
 
-String foundNetworks[MAX_NETWORKS];
-int    foundNetworkCount = 0;
-int    selectedNetwork   = 0;
-int    wifiListScroll    = 0;
-
 // ============================================================
 //  Hardware objects
 // ============================================================
 
-DNSServer       dnsServer;
-OneWire         oneWire(TEMP_PIN);
-DallasTemperature tempSensor(&oneWire);
+DNSServer dnsServer;
 
 // ============================================================
 //  Timers
@@ -137,14 +128,9 @@ void setup() {
   loadData();
   loadDayLog();
 
-  // DS18B20 initial read
-  tempSensor.begin();
-  tempSensor.setResolution(12);
-  tempSensor.requestTemperatures();
-  delay(800);
-  float t = tempSensor.getTempCByIndex(0);
-  waterTemp = (t == DEVICE_DISCONNECTED_C || t <= -50.0f) ? -127.0f : t;
-  Serial.printf("[DS18B20] %.2f C\n", waterTemp);
+
+  // DS18B20 temperature sensor
+  tempSetup();
 
   // Flow sensor
   flowSetup();
@@ -182,21 +168,24 @@ void setup() {
   // Resolve today's date
   if (ntpSynced || rtcOk) {
     char realDate[12];
-    getCurrentDateStr(realDate);
-    if (strcmp(todayDate, "00.00.0000") != 0 &&
-        strcmp(todayDate, realDate) != 0) {
-      Serial.printf("[BOOT] Date changed: %s -> %s\n", todayDate, realDate);
-      commitTodayToLog();
-      strncpy(todayDate, realDate, 12);
-      todayCold = todayWarm = todayHot = todayCost = 0.0f;
-      saveData();
-    } else {
-      strncpy(todayDate, realDate, 12);
+    if (getCurrentDateStr(realDate)) {
+      if (strcmp(todayDate, "00.00.0000") != 0 &&
+          strcmp(todayDate, realDate) != 0) {
+        Serial.printf("[BOOT] Date changed: %s -> %s\n", todayDate, realDate);
+        // Commit accumulated data for the OLD date before zeroing
+        commitTodayToLog();
+        strncpy(todayDate, realDate, 12);
+        todayCold = todayWarm = todayHot = todayCost = 0.0f;
+        saveData();
+      } else {
+        strncpy(todayDate, realDate, 12);
+      }
     }
   }
 
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
   webServer.begin();
+  WiFi.scanNetworks(true); // async scan for web UI
 
   // Boot summary on OLED
   u8g2.clearBuffer();
@@ -235,34 +224,29 @@ void setup() {
 
 void loop() {
   uint32_t now = millis();
-
-  // Flow calculation
   if (now - tFlow >= I_FLOW) { tFlow = now; calcFlow(); }
-
-  // Temperature async read
   if (now - lastTempRead >= TEMP_INTERVAL) {
     lastTempRead = now;
-    float t = tempSensor.getTempCByIndex(0);
-    waterTemp = (t == DEVICE_DISCONNECTED_C || t <= -50.0f) ? -127.0f : t;
-    tempSensor.requestTemperatures();
+    tempUpdate();
   }
-
-  // Display refresh
-  if (now - tDisp >= I_DISP) { tDisp = now; updateDisplay(); }
-
-  // Periodic NVS save + log commit
-  if (now - tSave >= I_SAVE) {
+ if (now - tDisp >= I_DISP) { tDisp = now; updateDisplay(); }
+ if (now - tSave >= I_SAVE) {
     tSave = now;
     saveData();
     commitTodayToLog();
     Serial.printf("[NVS] %.3fL / %.2fUAH / %s\n", totalVol, totalCost, todayDate);
   }
-
-  // Web server & DNS
   if (now - tWifi >= I_WIFI) {
     tWifi = now;
     dnsServer.processNextRequest();
     handleWifi();
+  }
+ checkDayChange();
+
+  char key = keypad.getKey();
+  if (key) {
+    Serial.printf("[KEY] %c\n", key);
+    handleKey(key);
   }
 
   // NTP retry
@@ -276,15 +260,5 @@ void loop() {
     lastReconnect = now;
     Serial.println("[WiFi] Reconnecting...");
     WiFi.begin(homeSSID, homePass);
-  }
-
-  // Day rollover check
-  checkDayChange();
-
-  // Keypad
-  char key = keypad.getKey();
-  if (key) {
-    Serial.printf("[KEY] %c\n", key);
-    handleKey(key);
   }
 }

@@ -46,9 +46,3 @@ extern char homePass[64];
 extern char defaultSSID[32];
 extern char defaultPass[64];
 extern bool settingsUnlocked;
-
-// --- WiFi scan ---
-extern String foundNetworks[MAX_NETWORKS];
-extern int    foundNetworkCount;
-extern int    selectedNetwork;
-extern int    wifiListScroll;

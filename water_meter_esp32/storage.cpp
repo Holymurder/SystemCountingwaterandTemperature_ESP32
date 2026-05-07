@@ -70,17 +70,84 @@ void saveDayLog() {
     snprintf(key, sizeof(key), "d%d", i);
     prefs.putBytes(key, &dayLog[i], sizeof(DayRecord));
   }
+  // Erase any leftover keys beyond current count (prevents stale phantom records)
+  for (int i = dayLogCount; i < MAX_DAYS; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "d%d", i);
+    if (prefs.isKey(key)) prefs.remove(key);
+    else break;
+  }
   prefs.end();
+}
+
+// ============================================================
+//  purgePhantomRecords — keep only records within [minMon/minYear .. maxMon/maxYear]
+//  Example: purgePhantomRecords(3, 2026, 4, 2026) keeps March–April 2026
+// ============================================================
+
+int purgePhantomRecords(int minMon, int minYear, int maxMon, int maxYear) {
+  int removed = 0;
+  int write = 0;
+  for (int i = 0; i < dayLogCount; i++) {
+    const char* d = dayLog[i].date; // "DD.MM.YYYY"
+    int mon  = (d[3]-'0')*10 + (d[4]-'0');
+    int year = (d[6]-'0')*1000 + (d[7]-'0')*100 + (d[8]-'0')*10 + (d[9]-'0');
+
+    // Convert to comparable integer: YYYYMM
+    int val    = year * 100 + mon;
+    int valMin = minYear * 100 + minMon;
+    int valMax = maxYear * 100 + maxMon;
+
+    if (val >= valMin && val <= valMax) {
+      if (write != i) dayLog[write] = dayLog[i];
+      write++;
+    } else {
+      Serial.printf("[PURGE] Removed: %s (out of range)\n", d);
+      removed++;
+    }
+  }
+  dayLogCount = write;
+  if (removed > 0) saveDayLog();
+  Serial.printf("[PURGE] Done: removed %d, kept %d records\n", removed, write);
+  return removed;
+}
+
+// Validate date string format DD.MM.YYYY
+static bool isValidDateStr(const char* d) {
+  if (strlen(d) != 10) return false;
+  // Check digit positions: 0,1,3,4,6,7,8,9 must be digits
+  for (int p : {0,1,3,4,6,7,8,9}) {
+    if (d[p] < '0' || d[p] > '9') return false;
+  }
+  if (d[2] != '.' || d[5] != '.') return false;
+  int day  = (d[0]-'0')*10 + (d[1]-'0');
+  int mon  = (d[3]-'0')*10 + (d[4]-'0');
+  int year = (d[6]-'0')*1000 + (d[7]-'0')*100 + (d[8]-'0')*10 + (d[9]-'0');
+  return (day >= 1 && day <= 31) &&
+         (mon >= 1 && mon <= 12) &&
+         (year >= 2020 && year <= 2099);
 }
 
 void loadDayLog() {
   prefs.begin("wlog", true);
-  dayLogCount = prefs.getInt("cnt", 0);
-  if (dayLogCount > MAX_DAYS) dayLogCount = 0;
-  for (int i = 0; i < dayLogCount; i++) {
+  int rawCount = prefs.getInt("cnt", 0);
+  if (rawCount < 0 || rawCount > MAX_DAYS) rawCount = 0;
+  dayLogCount = 0;
+  for (int i = 0; i < rawCount; i++) {
     char key[8];
     snprintf(key, sizeof(key), "d%d", i);
-    prefs.getBytes(key, &dayLog[i], sizeof(DayRecord));
+    DayRecord tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    size_t got = prefs.getBytes(key, &tmp, sizeof(DayRecord));
+    // Skip corrupt records: wrong size or invalid date string
+    if (got != sizeof(DayRecord)) continue;
+    tmp.date[11] = '\0'; // ensure null-terminated
+    if (!isValidDateStr(tmp.date)) {
+      Serial.printf("[LOG] Skipping corrupt record d%d: '%s'\n", i, tmp.date);
+      continue;
+    }
+    dayLog[dayLogCount++] = tmp;
   }
   prefs.end();
+  Serial.printf("[LOG] Loaded %d valid records\n", dayLogCount);
 }

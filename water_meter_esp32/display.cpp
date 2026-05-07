@@ -38,9 +38,9 @@ void drawFooter(const char* t) {
 
 static const char* menuItems[] = {
   "1. Meter", "2. Analytics", "3. Settings",
-  "4. WiFi info", "5. Clock", "6. Reset"
+  "4. WiFi info", "5. Clock"
 };
-static const int MENU_COUNT = 6;
+static const int MENU_COUNT = 5;
 
 static void drawMainMenu() {
   u8g2.clearBuffer();
@@ -162,7 +162,8 @@ static void drawAnalytics() {
     }
   }
 
-  snprintf(buf, sizeof(buf), "[A/8]prev [B/2]next %d/%d", analyticsPage + 1, totalPages);
+
+  snprintf(buf, sizeof(buf), "[2]next [8]prev %d/%d", analyticsPage + 1, totalPages);
   u8g2.setFont(u8g2_font_4x6_tf);
   u8g2.drawStr(0, 63, buf);
   u8g2.sendBuffer();
@@ -191,13 +192,13 @@ static void drawSettings() {
   drawTitle("=== SETTINGS ===");
   u8g2.setFont(u8g2_font_6x10_tf);
   u8g2.drawStr(0, 22, "1. Change tariffs");
-  u8g2.drawStr(0, 32, "2. WiFi for NTP");
-  u8g2.drawStr(0, 42, "3. WiFi toggle");
-  u8g2.drawStr(0, 52, "4. Temp threshold");
+  u8g2.drawStr(0, 32, "2. WiFi toggle");
+  u8g2.drawStr(0, 42, "3. Temp threshold");
+  u8g2.drawStr(0, 52, "4. Reset data");
 
   char buf[28];
   u8g2.setFont(u8g2_font_5x7_tf);
-  snprintf(buf, sizeof(buf), "   WiFi:%s Thr:%s",
+  snprintf(buf, sizeof(buf), "WiFi:%s Thr:%s WebUI:192.168.4.1",
            wifiOn ? "ON" : "OFF", tempThreshEnabled ? "ON" : "OFF");
   u8g2.drawStr(0, 62, buf);
   u8g2.sendBuffer();
@@ -280,69 +281,16 @@ static void drawThreshInput(const char* title, float current) {
   u8g2.sendBuffer();
 }
 
-static void drawWifiScan() {
+static void drawWifiConnectWeb() {
   u8g2.clearBuffer();
-  drawTitle("=== WiFi SCAN ===");
+  drawTitle("=== WiFi CONNECT ===");
   u8g2.setFont(u8g2_font_5x7_tf);
-
-  if (foundNetworkCount == 0) {
-    u8g2.drawStr(10, 35, "Scanning...");
-    u8g2.sendBuffer();
-    return;
-  }
-
-  for (int i = wifiListScroll; i < foundNetworkCount && i < wifiListScroll + 4; i++) {
-    int y = 22 + (i - wifiListScroll) * 10;
-    String name = foundNetworks[i];
-    if (name.length() > 18) name = name.substring(0, 17) + "~";
-
-    if (i == selectedNetwork) {
-      u8g2.drawBox(0, y - 7, 128, 9);
-      u8g2.setDrawColor(0);
-      u8g2.drawStr(2, y, name.c_str());
-      u8g2.setDrawColor(1);
-    } else {
-      u8g2.drawStr(2, y, name.c_str());
-    }
-  }
-
-  u8g2.setFont(u8g2_font_4x6_tf);
-  char pg[28];
-  snprintf(pg, sizeof(pg), "[A/8]up [B/2]dn [#]sel %d/%d",
-           selectedNetwork + 1, foundNetworkCount);
-  u8g2.drawStr(0, 63, pg);
-  u8g2.sendBuffer();
-}
-
-static void drawWifiPass() {
-  u8g2.clearBuffer();
-  drawTitle("=== WiFi PASS ===");
-  u8g2.setFont(u8g2_font_5x7_tf);
-
-  String netName = foundNetworks[selectedNetwork];
-  if (netName.length() > 20) netName = netName.substring(0, 19) + "~";
-  u8g2.drawStr(0, 22, netName.c_str());
-  u8g2.drawStr(0, 31, "Password:");
-
-  String disp = inputBuf + "_";
-  if (disp.length() > 16) disp = "..." + disp.substring(disp.length() - 13);
-  u8g2.drawStr(0, 41, disp.c_str());
-
-  u8g2.drawStr(0, 52, "[*]=dot [0-9]=digit");
-  u8g2.drawStr(0, 60, "[D]del [#]OK [C]cancel");
-  u8g2.sendBuffer();
-}
-
-static void drawWifiDefault() {
-  u8g2.clearBuffer();
-  drawTitle("=== DEFAULT WiFi ===");
-  u8g2.setFont(u8g2_font_6x10_tf);
-  u8g2.drawStr(0, 24, "Set as default?");
-  String netName = foundNetworks[selectedNetwork];
-  if (netName.length() > 20) netName = netName.substring(0, 19);
-  u8g2.drawStr(0, 36, netName.c_str());
-  u8g2.drawStr(0, 48, "Auto-connect on boot");
-  drawFooter("[A]=YES   [#]=NO");
+  u8g2.drawStr(0, 22, "Connect via Web UI:");
+  u8g2.drawStr(0, 32, "1. Connect to AP:");
+  u8g2.drawStr(0, 41, "   WaterMeter / 12345678");
+  u8g2.drawStr(0, 51, "2. Open 192.168.4.1");
+  u8g2.drawStr(0, 60, "3. WiFi section on page");
+  drawFooter("[#] Back");
   u8g2.sendBuffer();
 }
 
@@ -357,7 +305,7 @@ static void drawReset() {
   u8g2.drawStr(10, 38, buf);
   snprintf(buf, sizeof(buf), "Cost: %.2f UAH", totalCost);
   u8g2.drawStr(10, 48, buf);
-  drawFooter("[*]=YES reset   [#]=NO");
+  drawFooter("[A]=YES reset   [#]=NO");
   u8g2.sendBuffer();
 }
 
@@ -451,9 +399,7 @@ void updateDisplay() {
     case M_SETTINGS_PASS:  drawSettingsPass(); break;
     case M_SET_TAR_MENU:   drawTarMenu();     break;
     case M_SET_TAR_VAL:    drawTarVal();      break;
-    case M_WIFI_SCAN:      drawWifiScan();    break;
-    case M_WIFI_PASS:      drawWifiPass();    break;
-    case M_WIFI_DEFAULT:   drawWifiDefault(); break;
+    case M_WIFI_CONNECT_WEB: drawWifiConnectWeb(); break;
     case M_WIFI:           drawWifi();        break;
     case M_RESET:          drawReset();       break;
     case M_CLOCK:          drawClock();       break;
